@@ -1,6 +1,6 @@
 # Project-2_Deep-_Learning_-Applications
 
-## Project 2, Week 5: Scene Classification with Transfer Learning
+## Project 2, Week 5: Neural Networks, Convolutions, and Transfer Learning
 
 **Author:** Raja Fahad Kiyani | **Course:** Introduction to Applied AI (BS 8th Semester, Department of Electronics) | **Platform:** Kaggle notebook
 
