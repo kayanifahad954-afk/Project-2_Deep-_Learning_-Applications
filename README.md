@@ -2,7 +2,7 @@
 
 ## Project 2, Week 5: Neural Networks, Convolutions, and Transfer Learning
 
-**Author:** Raja Fahad Kiyani | **Course:** Introduction to Applied AI (BS 8th Semester, Department of Electronics) | **Platform:** Kaggle notebook
+**Author:** Raja Fahad Kiyani | **Course:** Introduction to Applied AI (BS 9th Semester, Department of Electronics) | **Platform:** Kaggle notebook
 
 - **Dataset:** Intel Image Classification, 6 classes, 14,034 train / 3,000 test
 - **Model:** ResNet-18 pretrained on ImageNet
