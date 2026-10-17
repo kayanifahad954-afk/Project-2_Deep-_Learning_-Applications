@@ -158,4 +158,4 @@ $$p_{\text{buildings}} = \frac{e^{7.21}}{e^{7.21} + \dots} \approx \frac{1350}{1
 
 ## 7. Week 6 proposal
 
-[One paragraph: the problem, who benefits, the dataset link, and the number of classes and images.]
+My Week 6 project will classify surface defects on hot-rolled steel strips, so that a manufacturing line can flag the defect type automatically instead of relying on slow, inconsistent manual inspection. Quality-control engineers and steel producers benefit, because catching crazing, inclusions, patches, pitted surfaces, rolled-in scale and scratches early reduces scrap and rework. The candidate dataset is the NEU Surface Defect Database (NEU-DET), available on Kaggle at https://www.kaggle.com/fantacher/neu-metal-surface-defects-data (I will confirm its license before using it). It has **6 classes with 300 grayscale 200 x 200 images each, 1,800 images in total**. Because it has no predefined test set, I will make my own stratified 70% / 15% / 15% split (1,260 train / 270 validation / 270 test), reuse the Week 5 pipeline with ResNet-18 transfer learning, convert grayscale images to 3 channels, and compare feature extraction with fine-tuning.
