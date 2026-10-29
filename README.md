@@ -156,6 +156,34 @@ $$p_{\text{buildings}} = \frac{e^{7.21}}{e^{7.21} + \dots} \approx \frac{1350}{1
 
 ---
 
-## 7. Week 6 proposal
-
-My Week 6 project will classify surface defects on hot-rolled steel strips, so that a manufacturing line can flag the defect type automatically instead of relying on slow, inconsistent manual inspection. Quality-control engineers and steel producers benefit, because catching crazing, inclusions, patches, pitted surfaces, rolled-in scale and scratches early reduces scrap and rework. The candidate dataset is the NEU Surface Defect Database (NEU-DET), available on Kaggle at https://www.kaggle.com/fantacher/neu-metal-surface-defects-data (I will confirm its license before using it). It has **6 classes with 300 grayscale 200 x 200 images each, 1,800 images in total**. Because it has no predefined test set, I will make my own stratified 70% / 15% / 15% split (1,260 train / 270 validation / 270 test), reuse the Week 5 pipeline with ResNet-18 transfer learning, convert grayscale images to 3 channels, and compare feature extraction with fine-tuning.
+## 7.Week 6 proposal
+ 
+**Domain: solar panel condition (electronics and energy).** Photovoltaic (PV) panels lose output when they are dirty, covered or damaged, and checking them by eye is slow. This is a defect-classification task like industrial inspection, and the Week 5 pipeline (pretrained ResNet-18, feature extraction, then fine-tuning) applies directly, with colour photos.
+ 
+**Problem.** Dust, bird droppings, snow, and electrical or physical damage reduce a panel's efficiency, and manual inspection is slow, costly and can be dangerous on large solar farms. I will build an image classifier that takes a photo of a solar panel and predicts its condition among 6 classes:
+ 
+| Class | Meaning |
+|---|---|
+| Clean | panel in good condition, no obstruction |
+| Dusty | dust that reduces light absorption |
+| Bird-drop | bird droppings that cause partial shading |
+| Snow-covered | panel partly or fully covered by snow |
+| Physical-damage | external damage such as cracked glass or a broken frame |
+| Electrical-damage | internal defects such as hot spots, delamination or bypass diode failure |
+ 
+**Who benefits.** Operators and maintenance teams of solar plants, and owners of rooftop systems, who could use it to decide which panels need cleaning or repair first. It would support, not replace, a technician's inspection.
+ 
+**Dataset.** The PV Panel Defect Dataset on Kaggle (alicjalena): **6 classes and about 14,999 images**. It combines the Kaggle dataset "Solar Panel Images: Clean and Faulty Images" with extra images collected from public web sources, and the rights to the individual images remain with their original owners, so I will use it for this course project only. Its description lists a ready-made split of 11,982 train, 1,501 validation and 1,516 test images, with between 2,169 (snow-covered) and 2,833 (bird-drop) images per class, so the largest class is only about 1.3 times the smallest. Links: <https://www.kaggle.com/datasets/alicjalena/pv-panel-defect-dataset> (main) and <https://www.kaggle.com/datasets/pythonafroz/solar-panel-images> (the smaller original source). I will confirm the exact counts and the licence on the Kaggle page and update this README.
+ 
+**Plan.**
+- Use colour images (`GRAYSCALE = False`), resize to $224 \times 224$, and normalise with the ImageNet mean and standard deviation.
+- **Check for duplicates first.** The images come from several sources, and a class with over 2,000 images that grows from a smaller original set may contain repeated or augmented copies. I will search for exact and near-duplicate images across the train, validation and test folders. If copies are found, I will remove them or re-split by group before training, so the test score is not inflated.
+- Use the dataset's own train, validation and test folders if the duplicate check passes. Otherwise, build my own grouped split.
+- Augment the training set only (flips, mild brightness and colour jitter, and small crops). Strong colour changes could turn a dusty panel into a clean-looking one, so I will keep them mild.
+- Train a new 6-class head first (`Linear(512, 6)`, $512 \times 6 + 6 = 3{,}078$ trainable parameters, the same as in Week 5), then fine-tune `layer4` with two learning rates ($10^{-3}$ head, $10^{-4}$ `layer4`), keep the best validation epoch by macro-F1, and evaluate on the test set once.
+- Report accuracy, macro-F1, per-class precision and recall, a confusion matrix and an error gallery, and compare with the Week 5 scene classifier.
+**Expected challenges.**
+- **Electrical damage may not be visible.** Hot spots, delamination and diode failures are internal defects that normally show up on thermal or electroluminescence images, so ordinary photos may not show them. I expect electrical-damage and physical-damage to be the hardest classes and will check their recall in the confusion matrix.
+- **Duplicates and leakage.** If the same image appears in both train and test, the score will be too high, which is why the duplicate check comes first.
+- **Web images are not field images.** A high score on this dataset does not show the model would work on photos from a real plant with different cameras, angles and lighting, and I will say so when I report the results.
+**Backup datasets I considered.** If this dataset turns out to be unsuitable (licence, duplicates or missing labels), I will switch to one of these. Counts are taken from the dataset descriptions and will be re-checked in my notebook.
