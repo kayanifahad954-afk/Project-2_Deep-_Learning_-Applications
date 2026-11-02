@@ -469,7 +469,7 @@ Accuracy alone is therefore misleading, so **macro-F1** is the headline metric. 
 
 **Models.** TF-IDF + Logistic Regression with balanced class weights.
 
-$$P(\text{spam}\mid x)=\sigma(w\cdot x+b)=\frac{1}{1+e^{-(w\cdot x+b)}},\qquad \mathrm{tf}_{\text{sublinear}}=1+\ln(\mathrm{tf}),\qquad w_c=\frac{n}{2\,n_c}$$
+$$P(\text{spam}\mid x)=\sigma(w\cdot x+b)=\frac{1}{1+e^{-(w\cdot x+b)}},\qquad \mathrm{tf}_{\text{sublinear}}=1+\ln(\mathrm{tf}),\qquad w_c=\frac{n}{2\ n_c}$$
 
 Class weights from the training set (ham 3,859, spam 598): $w_{\text{ham}}=\frac{4457}{2\cdot3859}=0.577$, $w_{\text{spam}}=\frac{4457}{2\cdot598}=3.727$.
 
@@ -622,7 +622,7 @@ EasyOCR on two synthetic images (whitespace normalised so line breaks do not cou
 | Shared invoice (Engro Fertilizers Ltd) | 0 | 0.000 | 0.000 | 4/4 = 1.00 |
 | My solar inspection label | 0 | 0.000 | 0.000 | 5/5 = 1.00 |
 
-$$\text{field accuracy}=\frac{\#\{\text{fields whose extracted value equals the truth}\}}{\#\{\text{fields in the truth}\}}$$
+$$\text{field accuracy}=\frac{\text{number of fields whose extracted value equals the truth}}{\text{number of fields in the truth}}$$
 
 **Interpretation.** The raw CER was already 0.000, so the repair rules had nothing to fix. A synthetic image is the easiest possible case: black text on white, one regular font, no blur, perspective, glare, shadows or JPEG noise. On a phone photo of a real invoice or panel nameplate I expect a much higher raw CER and a smaller gain from the simple "O → 0" rules. CER also understates the damage: one wrong digit makes a whole amount or ID wrong, which is why field-level accuracy is reported next to it.
 
@@ -644,7 +644,7 @@ $$p_k=\frac{e^{z_k}}{\sum_{j=1}^{7}e^{z_j}},\qquad \sum_k p_k=1$$
 
 $$\text{image flag}=\mathbb{1}[p\ge\tau],\qquad \text{text flag}=\mathbb{1}[\text{urgent terms}\ne\varnothing],\qquad \text{REFER if any flag is set; flag for human review if the flags differ}$$
 
-Urgent solar terms: `hot spot, burn, spark, smoke, melt, short circuit, spreading, crack, no output, shock`. When labelled image-text pairs are available, a weighted fusion $p=w\,p_{\text{img}}+(1-w)\,p_{\text{txt}}$ can replace the rules, with $w$ chosen on validation data (e.g. $w=0.5$, $p_{\text{img}}=0.30$, $p_{\text{txt}}=0.80$ gives $p=0.55$).
+Urgent solar terms: `hot spot, burn, spark, smoke, melt, short circuit, spreading, crack, no output, shock`. When labelled image-text pairs are available, a weighted fusion $p=w\ p_{\text{img}}+(1-w)\ p_{\text{txt}}$ can replace the rules, with $w$ chosen on validation data (e.g. $w=0.5$, $p_{\text{img}}=0.30$, $p_{\text{txt}}=0.80$ gives $p=0.55$).
 
 **Privacy.** The note is masked **before** any extraction, so nothing downstream ever holds the identifier:
 
