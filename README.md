@@ -400,3 +400,316 @@ Sixteen heatmaps were read (6 + 10; the first six are all Bird-drop because the 
 Kaggle notebook, seed 42, `StratifiedGroupKFold(n_splits=6, shuffle=True, random_state=42)`, PyTorch/torchvision ResNet-18, checkpoint `week6_model.pt` (epoch-10 weights, ≈ 44.7 MB: $11.18\text{ M}\times4$ bytes).
 
 *Next steps:* turn Internet on (or add ResNet-18 weights) to run the planned two-phase fine-tuning, use a GPU, resolve the label-conflict duplicates, test `USE_SAMPLER = True`, and run the masking experiment.
+
+
+## Week 7: Text and Multimodal AI
+
+Project 2 (Deep Learning Applications) · Introduction to Applied AI · Domain: **solar-panel condition monitoring** (Week 6 ResNet-18 image model + text notes)
+
+- **Text classifier:** SMS Spam Collection, 5,572 texts, macro-F1 **0.974** (word) vs **0.982** (char)
+- **Top positive / negative features:** `call, txt, free, text, reply` / `my, me, ok, that, it`
+- **NER on my domain:** out-of-the-box held-out F1 **0.370** → with entity ruler **0.759** (provided set: 0.533 → 0.875)
+- **Regex fields extracted:** `cnic, mobile, amount, date, email, invoice, panel_id, serial, power_wp, voltage`; false positives tested: 2 provided + 4 solar negative tests, all clean
+- **OCR:** CER raw **0.000** → after correction rules **0.000** on clean synthetic images (unit tests: 0.143 → 0.000)
+- **Pipeline:** image model + text evidence → JSON record (example below)
+- **Privacy:** CNIC, phone, and email masked before logging
+
+---
+
+## Results at a glance
+
+| Component | Metric | Before | After / result |
+|---|---|---|---|
+| TF-IDF by hand | d1 weights, hand vs library | n/a | identical: win 0.584, free 0.445, cash 0.584, now 0.345 |
+| Text classifier (word 1-2 grams) | macro-F1 | baseline "always ham" accuracy 0.866 | **0.974** |
+| Text classifier (char 2-5 grams) | macro-F1 | 0.974 (word) | **0.982** |
+| NER, provided set (16 gold entities) | entity-level F1 | 0.533 | **0.875** (7 rules) |
+| NER, solar domain, held-out (15 gold entities) | entity-level F1 | 0.370 | **0.759** (4 rules) |
+| Regex | tests passed | n/a | 5/5 provided, 6/6 solar |
+| OCR repair, unit tests | CER | 0.062 / 0.059 / 0.143 | 0.000 / 0.000 / 0.000 |
+| OCR, EasyOCR on synthetic images | CER | 0.000 | 0.000 |
+| Case record | decision | n/a | REFER, P(Electrical-damage) = 0.803, PII masked |
+
+> Every component is reported as a number. The held-out NER score is the honest one: the rules were written from sentences 1-5 and scored on sentences 6-10.
+
+---
+
+## 1. TF-IDF by hand
+
+scikit-learn uses smooth IDF followed by L2 normalisation:
+
+$$\mathrm{idf}(t)=\ln\frac{1+N}{1+\mathrm{df}(t)}+1,\qquad \mathrm{tfidf}(t,d)=\mathrm{tf}(t,d)\cdot\mathrm{idf}(t),\qquad \hat v_d=\frac{v_d}{\lVert v_d\rVert_2}$$
+
+Corpus: `d1 = "win free cash now"`, `d2 = "call me now"`, `d3 = "free call now"` ($N=3$). Hand calculation for d1 (each term occurs once, so tf = 1):
+
+| term | df | idf | idf² | normalised value | library value |
+|---|---|---|---|---|---|
+| win | 1 | ln(4/2)+1 = 1.6931 | 2.8667 | 1.6931 / 2.8968 = **0.584** | 0.584 |
+| free | 2 | ln(4/3)+1 = 1.2877 | 1.6581 | 1.2877 / 2.8968 = **0.445** | 0.445 |
+| cash | 1 | ln(4/2)+1 = 1.6931 | 2.8667 | 1.6931 / 2.8968 = **0.584** | 0.584 |
+| now | 3 | ln(4/4)+1 = 1.0000 | 1.0000 | 1.0000 / 2.8968 = **0.345** | 0.345 |
+
+Vector length: $\lVert v\rVert=\sqrt{2.8667+1.6581+2.8667+1}=\sqrt{8.3916}=2.8968$.
+
+"now" gets the lowest weight because it occurs in every message: $\ln(4/4)=0$, so only the smoothing "+1" is left.
+
+Cosine similarity (vectors already have length 1, so it is the dot product), shared terms "call" and "now":
+
+$$\cos(d_2,d_3)=0.548\times0.620+0.425\times0.481=0.340+0.204=\mathbf{0.544}\approx0.54\ \text{(slide 10)}$$
+
+---
+
+## 2. Text classification: word vs character n-grams
+
+**Data.** SMS Spam Collection (Almeida et al.), 5,572 messages: 4,825 ham and 747 spam.
+
+$$\text{spam share}=\frac{747}{5572}=0.134,\qquad \text{always-ham accuracy}=\frac{4825}{5572}=0.866$$
+
+Accuracy alone is therefore misleading, so **macro-F1** is the headline metric. Split: 80/20 stratified, `random_state=42` → 4,457 train, 1,115 test (149 spam, 966 ham).
+
+**Models.** TF-IDF + Logistic Regression with balanced class weights.
+
+$$P(\text{spam}\mid x)=\sigma(w\cdot x+b)=\frac{1}{1+e^{-(w\cdot x+b)}},\qquad \mathrm{tf}_{\text{sublinear}}=1+\ln(\mathrm{tf}),\qquad w_c=\frac{n}{2\,n_c}$$
+
+Class weights from the training set (ham 3,859, spam 598): $w_{\text{ham}}=\frac{4457}{2\cdot3859}=0.577$, $w_{\text{spam}}=\frac{4457}{2\cdot598}=3.727$.
+
+**Metrics** (spam is the positive class):
+
+$$P=\frac{TP}{TP+FP},\quad R=\frac{TP}{TP+FN},\quad F_1=\frac{2PR}{P+R},\quad \text{macro-}F_1=\frac{F_1^{\text{ham}}+F_1^{\text{spam}}}{2}$$
+
+| Model | Features | Macro-F1 | Spam precision | Spam recall | False positives | Missed spam |
+|---|---|---|---|---|---|---|
+| Word 1-2 grams (`min_df=2`) | 12,128 | 0.974 | 0.979 | 0.933 | 3 | 10 |
+| Char 2-5 grams (`char_wb`, `min_df=2`) | 36,449 | **0.982** | **0.986** | **0.953** | 2 | 7 |
+
+Worked calculation, word model ($TP=149-10=139$, $TN=966-3=963$):
+
+$$P_{\text{spam}}=\tfrac{139}{142}=0.979,\quad R_{\text{spam}}=\tfrac{139}{149}=0.933,\quad F_1^{\text{spam}}=0.955,\quad F_1^{\text{ham}}=0.993,\quad \text{macro-}F_1=\tfrac{0.993+0.955}{2}=0.974$$
+
+Worked calculation, char model ($TP=142$, $TN=964$):
+
+$$P_{\text{spam}}=\tfrac{142}{144}=0.986,\quad R_{\text{spam}}=\tfrac{142}{149}=0.953,\quad F_1^{\text{spam}}=0.969,\quad F_1^{\text{ham}}=0.995,\quad \text{macro-}F_1=\tfrac{0.995+0.969}{2}=0.982$$
+
+The char model gains **+0.008** macro-F1 for about $36449/12128\approx3.0\times$ more features. A word gives $\sum_{n=2}^{5}(L-n+1)=5+4+3+2=14$ character n-grams when padded to length $L=6$ (e.g. `" free "`), so misspellings such as `FR33` still share pieces with `free`.
+
+### What the word model learned
+
+A coefficient is a change in log-odds, so a present feature multiplies the odds of spam by $e^{w_j}$.
+
+| Direction | Top n-grams | Reading |
+|---|---|---|
+| Spam-like | `call, txt, free, text, reply, uk, to, www, mobile, claim, stop, your` | mostly sensible (calls to action, premium-rate vocabulary); `to` and `your` are likely shortcuts (common function words in long promotional texts) |
+| Ham-like | `my, me, ok, that, it, but, ll, gt, lt, can, what, da` | personal chat words; `gt` / `lt` are leftovers of HTML escapes (`&gt;`, `&lt;`) in the data, not meaning |
+
+### Error analysis (word model: 13 errors = 10 missed spam + 3 false alarms; error rate 13/1115 = 1.17%)
+
+| Verdict | Count | Examples |
+|---|---|---|
+| Model error | 7 | "ringtoneking 84484", "FreeMsg Hey there darling...", "Download as many ringtones...", "Waiting for your call." (the word "call" is a shortcut), "Ok... Ur typical reply..." |
+| Label error | 1 | "Do you realize that in about 40 years... tattoos?" labelled spam |
+| Genuinely ambiguous | 5 | warning about scam texts, "arsenal dartboard" ad, callback "I'm on 07090201529", joke-news subscription, recruiter-style text labelled ham |
+
+### Tricky messages (P(spam); threshold 0.5)
+
+| Message | Word | Char | Outcome |
+|---|---|---|---|
+| `W1N a FR33 pr1ze!! txt CLAIM now` (lab example) | n/a | 0.85 | caught, log-odds $\ln\frac{0.85}{0.15}=+1.73$ |
+| `kal milte hain, 5 baje` (Roman Urdu ham, lab example) | n/a | 0.12 | correct, log-odds $-1.99$ |
+| Roman Urdu spam: "Mubarak ho! Aap ne 50000 ka inam jeeta hai..." | 0.63 | 0.49 | word barely catches it, char barely misses it |
+| Leetspeak spam: `Y0u h4ve w0n a fr33 g1ft c@rd!!...` | 0.17 | 0.42 | both miss, char is closer |
+| Roman Urdu ham: "Kal office aa jana, meeting 5 baje hai" | 0.13 | 0.09 | both correct |
+
+Character features help with disguised spelling, but neither model reliably catches Roman Urdu spam: the dataset is English and has almost no Roman Urdu. The fix is labelled Roman Urdu and obfuscated examples, not just different features.
+
+---
+
+## 3. Named entity recognition, measured
+
+An entity counts as correct only if its **exact text and label** both match the gold annotation. With predicted set $\hat E$ and gold set $G$:
+
+$$TP=|\hat E\cap G|,\quad FP=|\hat E\setminus G|,\quad FN=|G\setminus\hat E|,\quad F_1=\frac{2TP}{2TP+FP+FN}$$
+
+### Provided Pakistani sentences (6 sentences, 16 gold entities)
+
+| Pipeline | TP | FP | FN | Precision | Recall | F1 |
+|---|---|---|---|---|---|---|
+| spaCy `en_core_web_sm` out of the box | 8 | 6 | 8 | 0.571 | 0.500 | **0.533** |
+| + entity ruler (7 patterns) | 14 | 2 | 2 | 0.875 | 0.875 | **0.875** |
+
+$$F_1^{\text{before}}=\frac{2\cdot8}{2\cdot8+6+8}=\frac{16}{30}=0.533,\qquad F_1^{\text{after}}=\frac{2\cdot14}{2\cdot14+2+2}=\frac{28}{32}=0.875,\qquad \Delta F_1=+0.342$$
+
+Typical out-of-the-box failures: `Engro Fertilizers` → PERSON (should be ORG), `30/09/2026` → GPE (should be DATE), `0300-1234567` → DATE (a phone number, a job for regex), `250,000` → CARDINAL (should be MONEY including "Rs."), `Farmer Muhammad Aslam` → PERSON including the title. The model was trained mostly on US/European news, so local names, formats and currency are out of distribution.
+
+### My domain: solar-panel sentences (10 sentences)
+
+Rules (`Jinko Solar`, `K-Electric`, `Huawei`, `Quaid-e-Azam Solar Park`, plus the MONEY and dd/mm/yyyy rules) were written from sentences 1-5 only; sentences 6-10 are held out.
+
+| Pipeline | Dev (sentences 1-5, 16 gold) | Held-out (sentences 6-10, 15 gold) |
+|---|---|---|
+| spaCy out of the box | 0.485 | 0.370 |
+| + entity ruler | 0.848 | **0.759** |
+
+Held-out detail after rules: 4 gold entities missed and 3 spurious, so $TP=15-4=11$, $FP=3$, $FN=4$:
+
+$$P=\frac{11}{14}=0.786,\quad R=\frac{11}{15}=0.733,\quad F_1=\frac{22}{22+3+4}=0.759,\quad \Delta F_1=0.759-0.370=+0.389$$
+
+The dev score is higher than the held-out score ($0.848>0.759$) because the rules were written from the dev sentences, which is why only the held-out number is reported as the result.
+
+| Remaining error after rules | What happened | Best fix |
+|---|---|---|
+| `Multan Solar Farm` | labelled ORG instead of FAC | add to the gazetteer / entity ruler |
+| `Technician Sana Iqbal` | PERSON span includes the title, so the exact text mismatches | rule that strips titles, or a model trained on my data |
+| `Bilal Raza` | not found at all | a model trained on local names (rules never cover every new name) |
+| `Peshawar` | labelled ORG instead of GPE | gazetteer of cities |
+
+Choice of fix: **names and facilities** → entity ruler / gazetteer (cheap and exact, but only covers listed names); **fixed formats** (phone, CNIC, dates) → regex; **open-ended person and place names** → a model trained on my own annotated data once I have a few hundred sentences. Ten sentences are far too few to train a model, so rules and regex are the right tools today.
+
+---
+
+## 4. Regex fields with negative tests
+
+| Field | Pattern | Idea |
+|---|---|---|
+| `cnic` | `\b\d{5}-\d{7}-\d\b` | exactly 5-7-1 digits with dashes |
+| `mobile` | `(?:\+92[- ]?\|\b0)3\d{2}[- ]?\d{7}\b` | `+92` or leading `0`, then 3 + 2 digits, then exactly 7 digits |
+| `amount` | `(?:PKR\|Rs\.?)\s?([\d,]+(?:\.\d{1,2})?)` | currency word, digits and commas, optional 1-2 decimals |
+| `date` | `\b\d{1,2}[/-]\d{1,2}[/-]\d{4}\b` | d/m/yyyy or d-m-yyyy |
+| `email` | `\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b` | local part, `@`, dotted domain |
+| `invoice` | `\b(?:Invoice\s+)?No\.?\s*(\d{3,})\b` | "No." followed by 3 or more digits |
+| `panel_id` (mine) | `\bSP-\d{4}\b` | `SP-` plus exactly 4 digits |
+| `serial` (mine) | `\b[A-Z]{3}\d{7}\b` | 3 letters + 7 digits |
+| `power_wp` (mine) | `\b\d{3,4}\s?Wp?\b` | 3-4 digits, optional space, `W` or `Wp` |
+| `voltage` (mine) | `\b\d{2,3}(?:\.\d{1,2})?\s?V\b` | 2-3 digits, optional decimals, `V` |
+
+| Test | Must find | Result |
+|---|---|---|
+| `CNIC 35202-1234567-1, mobile +92 300 1234567` | CNIC, mobile | PASS |
+| `Total Rs. 12,500.50 paid on 05/10/2026` | amount 12,500.50, date | PASS |
+| `Invoice No. 4417 from info@engro.com.pk` | email, invoice 4417 | PASS |
+| `Order 12345678901234 shipped` | nothing (not a CNIC) | PASS (`{}`) |
+| `Room 0300 on floor 3` | nothing (not a mobile) | PASS (`{}`) |
+| `Panel SP-1042 rated 550 Wp at 49.5 V, serial ABC1234567` | panel_id, power_wp, voltage, serial | PASS |
+| `Inverter output fell to 220 V on SP-2201` | voltage, panel_id | PASS |
+| `Room SP-12 on floor 3` | nothing (ID needs 4 digits) | PASS (`[]`) |
+| `He ordered 500 Watts of 48 Volts power` | nothing (unit needs a word boundary) | PASS (`[]`) |
+| `Call 2024 West Road, VIP gate 12` | nothing | PASS (`[]`) |
+| `Order 12345678 shipped` | nothing (no 3-letter prefix) | PASS (`[]`) |
+
+**Total: 5/5 provided tests and 6/6 solar tests pass (2 + 4 = 6 negative tests, all clean).**
+
+**A pattern that matched too much.** My first panel-ID pattern `SP-\d+` returned `['SP-1042', 'SP-99', 'SP-12345678']`: it matched inside `ASP-99` (no left boundary) and swallowed an 8-digit number (no exact count). The fixed `\bSP-\d{4}\b` returns only `['SP-1042']`. The three tools were word boundaries, an exact digit count, and a fixed prefix.
+
+---
+
+## 5. Character error rate and OCR repair
+
+Edit distance by dynamic programming, and CER as edits over reference length:
+
+$$d_{i,j}=\min\big(d_{i-1,j}+1,\ d_{i,j-1}+1,\ d_{i-1,j-1}+\mathbb{1}[a_i\ne b_j]\big),\qquad \mathrm{CER}=\frac{S+D+I}{N}=\frac{\mathrm{lev}(\text{ref},\text{hyp})}{N}$$
+
+`fix_ocr()` repairs look-alike characters only **inside numbers** (`O`→`0`, `l`/`I`→`1`) and `N0.` → `No.`
+
+| Reference | OCR output | Edits | CER before | CER after fix |
+|---|---|---|---|---|
+| `Invoice No. 4417` | `Invoice N0. 4417` | 1 | 1/16 = **0.062** | 0.000 |
+| `Total: PKR 12,500` | `Total: PKR 12,5O0` | 1 | 1/17 = **0.059** | 0.000 |
+| `Due 30/09/2026` | `Due 3O/09/2O26` | 2 | 2/14 = **0.143** | 0.000 |
+
+EasyOCR on two synthetic images (whitespace normalised so line breaks do not count):
+
+| Document | Characters wrong | CER raw | CER after fixes | Field-level accuracy |
+|---|---|---|---|---|
+| Shared invoice (Engro Fertilizers Ltd) | 0 | 0.000 | 0.000 | 4/4 = 1.00 |
+| My solar inspection label | 0 | 0.000 | 0.000 | 5/5 = 1.00 |
+
+$$\text{field accuracy}=\frac{\#\{\text{fields whose extracted value equals the truth}\}}{\#\{\text{fields in the truth}\}}$$
+
+**Interpretation.** The raw CER was already 0.000, so the repair rules had nothing to fix. A synthetic image is the easiest possible case: black text on white, one regular font, no blur, perspective, glare, shadows or JPEG noise. On a phone photo of a real invoice or panel nameplate I expect a much higher raw CER and a smaller gain from the simple "O → 0" rules. CER also understates the damage: one wrong digit makes a whole amount or ID wrong, which is why field-level accuracy is reported next to it.
+
+---
+
+## 6. Pipeline: image model + text evidence → JSON record
+
+```
+Image ─── Week 6 ResNet-18 (7 classes) ─────────────────┐
+                                                         ├─► Fuse (transparent rules) ─► JSON record + reasons
+Note ──► Mask PII FIRST ──► NER + regex + keywords ──────┘
+```
+
+**Image model.** ResNet-18, input 224×224, 7 classes: Bird-drop, Clean, Dusty, Electrical-damage, New, Physical-Damage, Snow-Covered. Softmax turns the 7 logits into probabilities:
+
+$$p_k=\frac{e^{z_k}}{\sum_{j=1}^{7}e^{z_j}},\qquad \sum_k p_k=1$$
+
+**Decision rule (late fusion by rules, threshold $\tau=0.5$, positive class = Electrical-damage, the class that must not be missed):**
+
+$$\text{image flag}=\mathbb{1}[p\ge\tau],\qquad \text{text flag}=\mathbb{1}[\text{urgent terms}\ne\varnothing],\qquad \text{REFER if any flag is set; flag for human review if the flags differ}$$
+
+Urgent solar terms: `hot spot, burn, spark, smoke, melt, short circuit, spreading, crack, no output, shock`. When labelled image-text pairs are available, a weighted fusion $p=w\,p_{\text{img}}+(1-w)\,p_{\text{txt}}$ can replace the rules, with $w$ chosen on validation data (e.g. $w=0.5$, $p_{\text{img}}=0.30$, $p_{\text{txt}}=0.80$ gives $p=0.55$).
+
+**Privacy.** The note is masked **before** any extraction, so nothing downstream ever holds the identifier:
+
+| Input | Output |
+|---|---|
+| `CNIC 35202-1234567-1, call 0300-1234567, a@b.pk` | `CNIC [CNIC], call [PHONE], [EMAIL]` |
+| `Room 0300 on floor 3, panel SP-1042, order 12345678901234` | unchanged (0 false masks) |
+
+An assertion checks that no phone or CNIC digit appears anywhere in the final JSON (`Privacy check passed`).
+
+### Example record
+
+```json
+{
+  "image": "Electrical (1).jpg",
+  "image_probabilities": {
+    "Bird-drop": 0.04, "Clean": 0.009, "Dusty": 0.021,
+    "Electrical-damage": 0.803, "New": 0.049,
+    "Physical-Damage": 0.071, "Snow-Covered": 0.007
+  },
+  "note_masked": "Technician Hamza Malik inspected the rooftop array at Gulberg Lahore on 12/09/2026. Burn marks and a hot spot near panel SP-1042 (550 Wp) are spreading. Owner CNIC [CNIC], mobile [PHONE].",
+  "text_evidence": {
+    "entities": [["Technician Hamza Malik", "PERSON"], ["Gulberg Lahore", "FAC"],
+                 ["12/09/2026", "DATE"], ["550", "CARDINAL"],
+                 ["CNIC", "ORG"], ["CNIC", "ORG"]],
+    "fields": {"date": ["12/09/2026"], "panel_id": ["SP-1042"], "power_wp": ["550 Wp"]},
+    "urgent_terms": ["hot spot", "burn", "spreading"]
+  },
+  "modalities_agree": true,
+  "decision": "REFER",
+  "reasons": [
+    "image model: P(Electrical-damage) = 0.80",
+    "note mentions: hot spot, burn, spreading"
+  ],
+  "disclaimer": "Decision support only; a qualified human decides."
+}
+```
+
+**Calculation check.** Probabilities sum to $0.040+0.009+0.021+0.803+0.049+0.071+0.007=1.000$. Since $0.803\ge0.5$ the image flag is set, and three urgent terms set the text flag. Both agree, so the decision is REFER with two reasons.
+
+**Wrong entities.** `CNIC` tagged ORG (twice, from the `[CNIC]` placeholder), `Technician Hamza Malik` (title inside PERSON), `Gulberg Lahore` as one FAC, `550` as CARDINAL. These are harmless here because the decision uses only the image probability and the urgent-term list; they would be harmful if a later step used ORG entities to look up or notify an organisation.
+
+### Image and note disagree
+
+Using a `Clean`-looking panel image:
+
+| Note | Image flag | Text flag | Agree | Decision |
+|---|---|---|---|---|
+| "Routine quarterly check, nothing unusual..." | 0 | 0 | True | ROUTINE |
+| "Smoke smell and a burn mark near the junction box..." | 0 | 1 (`burn, smoke`) | **False** | **REFER** (reason: "image and note DISAGREE: human review required") |
+
+The system does not average the disagreement away: either the photo (bad angle, wrong panel) or the note (copy-paste, wrong site) is faulty, so a human checks both.
+
+---
+
+## Limitations and next steps
+
+- The solar gold set has only 10 sentences (15 held-out entities), so one entity changes the held-out F1 by several points; a larger annotated set is needed before trusting the 0.759.
+- The SMS data is English; Roman Urdu spam and leetspeak are not reliably caught (0.49 and 0.42 for the char model).
+- OCR was tested only on clean synthetic images (CER 0.000); real phone photos and Urdu (Nastaliq) text still need measuring.
+- Image/text fusion uses transparent rules, not learned weights, because there are no labelled image-text pairs to choose $w$ on.
+- Decision support only: a qualified human makes the final call.
+
+## How to run
+
+1. Kaggle notebook, Internet **On** (EasyOCR downloads about 100 MB on first use).
+2. Add the *SMS Spam Collection Dataset* (uciml), the private `week6-model` dataset containing `week6_model.pt`, and the Week 6 image dataset.
+3. Run all cells; each part ends with a "Write it" cell and the notebook finishes with the Check Your Understanding answers.
